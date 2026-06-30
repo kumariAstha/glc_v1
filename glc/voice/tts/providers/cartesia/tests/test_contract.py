@@ -12,6 +12,14 @@ import pytest
 
 from glc.voice.tts.base import SynthesizeResult, TTSError
 from glc.voice.tts.providers.cartesia.adapter import Provider
+from glc.voice.tts.providers.cartesia.schemas import (
+    CARTESIA_API_VERSION,
+    CARTESIA_ENDPOINT,
+    DEFAULT_MODEL_ID,
+    DEFAULT_SAMPLE_RATE,
+    OUTPUT_CONTAINER,
+    OUTPUT_ENCODING,
+)
 
 
 @pytest.mark.asyncio
@@ -104,31 +112,34 @@ async def test_synthesize_live_path_streams_and_encodes_audio(monkeypatch):
             return FakeResponse()
 
     fake_client = FakeClient()
+    voice_id = "a0e99841-438c-4a64-b679-ae501e7d6091"
     monkeypatch.setenv("CARTESIA_API_KEY", "test-key")
     monkeypatch.setenv("CARTESIA_VOICE_ID", "env-voice")
     monkeypatch.setattr(adapter_module, "_CLIENT", fake_client, raising=False)
 
-    result = await Provider().synthesize("hello", voice_id="explicit-voice")
+    result = await Provider().synthesize("hello", voice_id=voice_id)
 
     assert result.audio_b64 == base64.b64encode(b"WAV").decode("ascii")
     assert result.mime == "audio/wav"
-    assert result.sample_rate == 24000
+    assert result.sample_rate == DEFAULT_SAMPLE_RATE
     assert result.provider == "cartesia"
     assert fake_client.calls == [
         {
             "method": "POST",
-            "url": "https://api.cartesia.ai/tts/bytes",
+            "url": CARTESIA_ENDPOINT,
             "headers": {
-                "Cartesia-Version": "2024-06-10",
                 "X-API-Key": "test-key",
+                "Cartesia-Version": CARTESIA_API_VERSION,
+                "Content-Type": "application/json",
             },
             "json": {
                 "transcript": "hello",
-                "voice": {"mode": "id", "id": "explicit-voice"},
+                "voice": {"mode": "id", "id": voice_id},
+                "model_id": DEFAULT_MODEL_ID,
                 "output_format": {
-                    "container": "wav",
-                    "encoding": "pcm_f32le",
-                    "sample_rate": 24000,
+                    "container": OUTPUT_CONTAINER,
+                    "encoding": OUTPUT_ENCODING,
+                    "sample_rate": DEFAULT_SAMPLE_RATE,
                 },
             },
         }

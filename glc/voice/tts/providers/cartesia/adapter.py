@@ -88,7 +88,7 @@ class Provider(TTSProvider):
         body = CartesiaTTSRequest(
             transcript=text,
             voice=CartesiaVoiceConfig(id=resolved_voice),
-        ).to_dict()
+        ).to_payload()
 
         # Stream the response so first bytes arrive as early as possible.
         # Even though we accumulate the full buffer here (SynthesizeResult
