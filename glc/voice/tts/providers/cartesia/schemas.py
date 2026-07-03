@@ -92,9 +92,7 @@ class CartesiaVoiceConfig(BaseModel):
         try:
             UUID(value)
         except ValueError as exc:
-            raise ValueError(
-                f"voice id must be a valid UUID, got {value!r}"
-            ) from exc
+            raise ValueError(f"voice id must be a valid UUID, got {value!r}") from exc
         return value
 
 
@@ -131,9 +129,7 @@ class CartesiaTTSRequest(BaseModel):
     transcript: str = Field(..., min_length=1)
     voice: CartesiaVoiceConfig
     model_id: str = DEFAULT_MODEL_ID
-    output_format: CartesiaOutputFormat = Field(
-        default_factory=CartesiaOutputFormat
-    )
+    output_format: CartesiaOutputFormat = Field(default_factory=CartesiaOutputFormat)
 
     def to_payload(self) -> dict[str, object]:
         """Serialize to the exact dict shape Cartesia's API expects.
@@ -175,9 +171,7 @@ def build_headers(api_key: str) -> dict[str, str]:
     }
 
 
-def resolve_voice_id(
-    explicit_voice_id: str | None, env_voice_id: str | None
-) -> str:
+def resolve_voice_id(explicit_voice_id: str | None, env_voice_id: str | None) -> str:
     """Resolve which voice id to actually send upstream, as a string.
 
     Precedence: explicit argument to `synthesize()` > `CARTESIA_VOICE_ID`
