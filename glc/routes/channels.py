@@ -14,11 +14,15 @@ back so adapter authors can verify their wire is plumbed correctly.
 
 from __future__ import annotations
 
+import hmac
 import json
+import os
 
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from glc.audit import append as audit_append
+from glc.channels import registry
 from glc.channels.envelope import ChannelMessage, ChannelReply
 from glc.config import get_or_create_install_token
 from glc.security.allowlists import allowed
@@ -112,3 +116,80 @@ async def channel_ws(websocket: WebSocket, name: str, token: str | None = Query(
             await websocket.send_text(reply.model_dump_json())
     except WebSocketDisconnect:
         return
+
+
+@router.get("/v1/channels/{name}/webhook")
+async def channel_webhook_verify(name: str, request: Request):
+    params = dict(request.query_params)
+    mode = params.get("hub.mode", "")
+    token = params.get("hub.verify_token", "")
+    challenge = params.get("hub.challenge", "")
+    expected = os.environ.get(f"{name.upper()}_VERIFY_TOKEN", "")
+    if mode == "subscribe" and hmac.compare_digest(token, expected):
+        return PlainTextResponse(challenge)
+    raise HTTPException(status_code=403)
+
+
+@router.post("/v1/channels/{name}/webhook")
+async def channel_webhook(name: str, request: Request):
+    try:
+        adapter = registry.instantiate(name)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"unknown channel: {name}") from None
+
+    raw = {
+        "raw_body": await request.body(),
+        "headers": dict(request.headers),
+    }
+    msg = await adapter.on_message(raw)
+    if msg is None:
+        return {"status": "ok"}
+
+    limiter = get_rate_limiter()
+    pairings = get_pairing_store()
+    owners = [p.channel_user_id for p in pairings.owners(channel=name)]
+
+    ok, why = allowed(
+        msg.channel,
+        msg.channel_user_id,
+        owner_ids=owners,
+        is_public_channel=bool(msg.metadata.get("is_public_channel", False)),
+        was_mentioned=bool(msg.metadata.get("was_mentioned", False)),
+    )
+    if not ok:
+        audit_append(
+            channel=msg.channel,
+            channel_user_id=msg.channel_user_id,
+            trust_level=msg.trust_level,
+            event_type="allowlist_drop",
+            result={"reason": why},
+        )
+        return {"status": "ok"}
+
+    ok, why = limiter.check_message(msg.channel, msg.channel_user_id)
+    if not ok:
+        audit_append(
+            channel=msg.channel,
+            channel_user_id=msg.channel_user_id,
+            trust_level=msg.trust_level,
+            event_type="rate_limit",
+            result={"reason": why},
+        )
+        return JSONResponse(status_code=429, content={"error": why})
+
+    audit_append(
+        channel=msg.channel,
+        channel_user_id=msg.channel_user_id,
+        trust_level=msg.trust_level,
+        event_type="inbound_message",
+        params={"text": msg.text, "thread_id": msg.thread_id, "provider": msg.metadata.get("provider")},
+    )
+
+    reply = ChannelReply(
+        channel=msg.channel,
+        channel_user_id=msg.channel_user_id,
+        text=f"[glc echo] {msg.text or ''}",
+        thread_id=msg.thread_id,
+    )
+    await adapter.send(reply)
+    return {"status": "ok"}

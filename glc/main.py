@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 
 ROOT = Path(__file__).parent
-load_dotenv(ROOT.parent.parent / ".env")  # repo .env, if present
+load_dotenv(ROOT.parent / ".env")  # repo .env, if present
 
 from glc import db  # noqa: E402
 from glc import embedders as E  # noqa: E402

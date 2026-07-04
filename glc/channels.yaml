@@ -13,7 +13,7 @@ channels:
   telegram:    {enabled: false}
   discord:     {enabled: false}
   slack:       {enabled: false}
-  whatsapp:    {enabled: false}
+  whatsapp:    {enabled: true}
   teams:       {enabled: false}
   matrix:      {enabled: false}
   line:        {enabled: false}
@@ -21,7 +21,7 @@ channels:
   gmail:       {enabled: false}
   imap:        {enabled: false}
   twilio_sms:  {enabled: false}
-  twilio_voice:{enabled: false}
+  twilio_voice: {enabled: false}
   webui:       {enabled: true}
   webhook:     {enabled: false}
   local_mic:   {enabled: false}

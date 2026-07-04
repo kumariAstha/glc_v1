@@ -22,7 +22,7 @@ from glc.channels.envelope import ChannelReply
 from glc.config import get_or_create_install_token
 
 # Load environment variables from .env at repository root
-load_dotenv(Path(__file__).parent.parent.parent.parent.parent / ".env")
+load_dotenv(Path(__file__).resolve().parents[5] / ".env")
 
 
 class RealDiscordClient:
@@ -63,6 +63,19 @@ class RealDiscordClient:
                     "code": 0,
                 }
 
+            response.raise_for_status()
+            return response.json()
+
+    async def get_messages(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Fetch messages from the active channel via GET request to Discord REST API."""
+        if not self.current_channel_id:
+            raise ValueError("No active Discord channel ID set in client context.")
+
+        url = f"https://discord.com/api/v10/channels/{self.current_channel_id}/messages?limit={limit}"
+
+        async with httpx.AsyncClient() as client:
+            print(f"[bridge] sending GET to Discord channel {self.current_channel_id} to fetch messages")
+            response = await client.get(url, headers=self.headers)
             response.raise_for_status()
             return response.json()
 

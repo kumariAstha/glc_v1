@@ -28,10 +28,10 @@ import pytest
 from dotenv import load_dotenv
 
 from glc.channels.catalogue.discord.adapter import Adapter
-from glc.channels.catalogue.discord.run_discord_bridge import RealDiscordClient
+from glc.channels.catalogue.discord.tests.run_discord_bridge import RealDiscordClient
 from glc.channels.envelope import ChannelReply
 
-load_dotenv(Path(__file__).resolve().parents[6] / ".env")
+load_dotenv(Path(__file__).resolve().parents[5] / ".env")
 
 BOT_TOKEN: str = os.environ.get("DISCORD_BOT_TOKEN", "")
 CHANNEL_ID: str = os.environ.get("DISCORD_TEST_CHANNEL_ID", "")
@@ -81,3 +81,16 @@ def test_get_user_resolves_handle(real_client: RealDiscordClient) -> None:
     assert user is not None, "expected a user dict, got None"
     assert "id" in user, f"missing 'id' field in user response: {user}"
     assert "username" in user, f"missing 'username' field in user response: {user}"
+
+
+@_skip_no_send
+@pytest.mark.asyncio
+async def test_get_messages(real_client: RealDiscordClient) -> None:
+    """RealDiscordClient.get_messages() fetches messages from a real Discord channel."""
+    real_client.current_channel_id = CHANNEL_ID
+    messages = await real_client.get_messages(limit=5)
+
+    assert isinstance(messages, list), f"expected list of messages, got {type(messages)}"
+    for msg in messages:
+        assert "id" in msg
+        assert "content" in msg

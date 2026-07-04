@@ -12,10 +12,10 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from glc.channels.catalogue.discord.run_discord_bridge import RealDiscordClient
+from glc.channels.catalogue.discord.tests.run_discord_bridge import RealDiscordClient
 
 # Load environment variables from .env at repository root
-load_dotenv(Path(__file__).parent.parent.parent.parent.parent / ".env")
+load_dotenv(Path(__file__).resolve().parents[5] / ".env")
 
 
 async def main():
