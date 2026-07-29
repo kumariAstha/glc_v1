@@ -1,9 +1,5 @@
-"""Channel-specific Pydantic types for the teams adapter. Add types
-here as needed; the canonical ChannelMessage / ChannelReply envelope
-lives in glc.channels.envelope."""
+"""Channel-specific constants for the teams adapter."""
 
 from __future__ import annotations
 
-# from pydantic import BaseModel
-# class TeamsSpecificType(BaseModel):
-#     ...
+ADAPTIVE_CARD_CONTENT_TYPE = "application/vnd.microsoft.card.adaptive"

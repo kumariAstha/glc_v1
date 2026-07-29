@@ -1,42 +1,93 @@
-# Groq Whisper Large v3 Turbo
+# Groq Whisper Large v3 Turbo STT Provider
 
-This is a **group assignment** in Session 11. Implement the Groq STT
-provider to make the seven tests at `tests/voice/stt/test_groq_whisper.py`
-pass.
+This provider implements Speech-to-Text (STT) transcription via the Groq Cloud LPU platform, using the `whisper-large-v3-turbo` model to achieve sub-second transcription latencies.
 
-## What you build
+## Status
 
-Two files under this directory:
+**Fully Implemented & Verified**. All structural, behavioural, and routing integration tests pass successfully.
 
-- `adapter.py` — subclass `glc.voice.stt.base.STTProvider` and implement
-  `transcribe(audio_bytes, mime) -> TranscribeResult`.
-- `schemas.py` — Pydantic types you need (rare for STT; usually empty).
+---
 
-## Required environment variables
+## Modular Architecture
 
-- `GROQ_API_KEY` — free sign-up at https://console.groq.com.
+The adapter uses a highly modular structure. The main provider orchestrates logical steps isolated in separate helper modules:
 
-## Free-tier limits
+* **`adapter.py`**: High-level orchestrator executing validation, configuration, payload building, network dispatch, response parsing, and translation.
+* **`schemas.py`**: Defines Pydantic models for response mapping (`GroqVerboseJsonResponse` and `GroqSegment`).
+* **`validation.py`**: Validates input types and values.
+* **`config.py`**: Loads API configurations and model overrides from the environment.
+* **`payload.py`**: Maps MIME formats and constructs multipart payloads.
+* **`network.py`**: Manages asynchronous HTTP requests to `api.groq.com`.
+* **`parsing.py`**: Handles JSON loading and Pydantic validation.
+* **`conversion.py`**: Maps parameters to a canonical `TranscribeResult`.
 
-Thousands of audio-minutes per month for unverified accounts. Verified
-accounts get higher limits. The LPU hardware delivers sub-second latency
-on short clips.
+---
 
-## Wire-format quirks
+## Configuration
 
-- The endpoint is `https://api.groq.com/openai/v1/audio/transcriptions`.
-  It is OpenAI-compatible — multipart/form-data with `file` and `model`.
-- Default model: `whisper-large-v3-turbo` (env override:
-  `GLC_GROQ_STT_MODEL`).
-- `response_format=verbose_json` to get the language code and duration.
-- 25 MB upload cap. Longer audio must be chunked client-side.
+Required environment variables:
 
-## Tests you need to pass
+* **`GROQ_API_KEY`**: Your Groq API credentials.
 
-The failing tests live at `tests/voice/stt/test_groq_whisper.py`. Six
-structural tests + one behavioural test (`test_channel_specific_behaviour_openai_multipart_shape`)
-that asserts the dispatched HTTP body is OpenAI-format multipart with
-`model` set, not arbitrary JSON.
+Optional environment variables:
 
-The mock-API fake at `tests/voice/stt/mocks/groq_whisper_mock.py` is
-your contract surface. Do **not** edit the mock or the test file.
+* **`GLC_GROQ_STT_MODEL`**: Override the target model (defaults to `whisper-large-v3-turbo`).
+
+---
+
+## Testing
+
+### Automated Test Suite
+To verify that all adapter features work correctly, run the test suites:
+```sh
+# Run main provider tests
+uv run pytest tests/voice/stt/test_groq_whisper.py
+
+# Run voice routing tests
+uv run pytest tests/test_voice_routing.py
+
+# Run transcription endpoint tests
+uv run pytest tests/test_transcribe_route.py
+```
+
+### Interactive Microphone Recording
+To test with a live laptop recording, use the helper script created at the workspace root:
+```sh
+uv run test_stt_mic.py
+```
+
+---
+
+## Verification & Test Results
+
+All 23 automated tests pass successfully:
+
+### 1. Provider Adapter Tests
+```
+(base) C:\SchoolofAI\session11> uv run pytest tests/voice/stt/test_groq_whisper.py
+collected 7 items
+
+tests\voice\stt\test_groq_whisper.py .......                             [100%]
+
+============================== 7 passed in 0.29s ==============================
+```
+
+### 2. Voice Routing Layer Tests
+```
+(base) C:\SchoolofAI\session11> uv run pytest tests/test_voice_routing.py
+collected 12 items
+
+tests\test_voice_routing.py ............                                 [100%]
+
+============================= 12 passed in 3.79s ==============================
+```
+
+### 3. FastAPI Endpoint Transcription Tests
+```
+(base) C:\SchoolofAI\session11> uv run pytest tests/test_transcribe_route.py
+collected 5 items
+
+tests\test_transcribe_route.py .....                                     [100%]
+
+======================== 5 passed, 1 warning in 0.38s =========================
+```
