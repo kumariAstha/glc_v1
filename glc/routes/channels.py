@@ -33,13 +33,11 @@ router = APIRouter()
 
 
 @router.websocket("/v1/channels/{name}")
-async def channel_ws(websocket: WebSocket, name: str, token: str | None = Query(default=None)):
+async def channel_ws(websocket: WebSocket, name: str):
     header_auth = websocket.headers.get("authorization") or websocket.headers.get("Authorization")
     presented = None
     if header_auth and header_auth.startswith("Bearer "):
         presented = header_auth.removeprefix("Bearer ").strip()
-    elif token:
-        presented = token
     expected = get_or_create_install_token()
     if presented != expected:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
@@ -65,7 +63,17 @@ async def channel_ws(websocket: WebSocket, name: str, token: str | None = Query(
             except Exception as e:
                 await websocket.send_text(json.dumps({"error": f"invalid envelope: {e}"}))
                 continue
-
+            if env.channel != name:
+                await websocket.send_text(json.dumps({"error": f"channel mismatch: expected {name}, got {env.channel}"}))
+                audit_append(
+                    channel=name,
+                    channel_user_id=env.channel_user_id,
+                    trust_level="untrusted",
+                    event_type="channel_mismatch",
+                    result={"expected": name, "declared_channel": env.channel},
+                )
+                await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                return
             ok, why = allowed(
                 env.channel,
                 env.channel_user_id,
@@ -149,6 +157,15 @@ async def channel_webhook(name: str, request: Request):
     pairings = get_pairing_store()
     owners = [p.channel_user_id for p in pairings.owners(channel=name)]
 
+    if msg.channel != name:
+        audit_append(
+            channel=name,
+            channel_user_id=msg.channel_user_id,
+            trust_level="untrusted",
+            event_type="channel_mismatch",
+            result={"expected": name, "declared_channel": msg.channel},
+        )
+        return JSONResponse(status_code=403, content={"error":  f"channel mismatch: expected {name}, got {msg.channel}"})
     ok, why = allowed(
         msg.channel,
         msg.channel_user_id,
