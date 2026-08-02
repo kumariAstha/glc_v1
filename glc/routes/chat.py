@@ -16,6 +16,8 @@ import os
 import time
 from pathlib import Path
 from typing import Any
+import base64
+import httpx as _httpx
 
 import yaml
 from fastapi import APIRouter, HTTPException, Request
@@ -24,6 +26,7 @@ from jsonschema import Draft202012Validator, ValidationError
 
 from glc import db
 from glc import providers as P
+from glc.security import ssrf
 from glc.llm_schemas import (
     BatchChatRequest,
     ChatRequest,
@@ -286,25 +289,6 @@ def _required_caps(req: ChatRequest):
 
 
 async def _resolve_image_urls(messages):
-    import base64
-
-    import httpx as _httpx
-
-    async def _fetch_to_data_url(url: str) -> str:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (compatible; GLCv1/0.1; +image-resolver)",
-            "Accept": "image/*,*/*;q=0.8",
-        }
-        async with _httpx.AsyncClient(timeout=30, follow_redirects=True, headers=headers) as c:
-            try:
-                r = await c.get(url)
-                r.raise_for_status()
-            except _httpx.HTTPError as e:
-                raise HTTPException(400, f"failed to fetch image url {url!r}: {e}")
-            mt = (r.headers.get("content-type") or "image/png").split(";")[0].strip()
-            b64 = base64.b64encode(r.content).decode()
-            return f"data:{mt};base64,{b64}"
-
     out = []
     for m in messages:
         content = m.get("content")
@@ -318,7 +302,7 @@ async def _resolve_image_urls(messages):
                 iu = b.get("image_url")
                 url = iu.get("url") if isinstance(iu, dict) else iu
                 if isinstance(url, str) and url.startswith(("http://", "https://")):
-                    data_url = await _fetch_to_data_url(url)
+                    data_url = await ssrf.fetch_to_data_url(url)
                     new_blocks.append({"type": "image_url", "image_url": {"url": data_url}})
                     changed = True
                     continue
@@ -330,7 +314,6 @@ async def _resolve_image_urls(messages):
         else:
             out.append(m)
     return out
-
 
 def _validate_structured(text: str, schema: dict):
     try:
@@ -471,7 +454,8 @@ async def chat(req: ChatRequest, request: Request):
                             session=req.session,
                             retries=retries,
                         )
-                        yield f"data: {json.dumps({'error': str(e)[:300]})}\n\n"
+                        # yield f"data: {json.dumps({'error': str(e)[:300]})}\n\n"
+                        yield f"data: {json.dumps({'provider': name, 'error': 'failed'})}\n\n"
 
                 return StreamingResponse(gen(), media_type="text/event-stream")
 
@@ -534,7 +518,8 @@ async def chat(req: ChatRequest, request: Request):
                     try:
                         parsed = _validate_structured(result["text"], req.response_format.schema_)
                     except (ValueError, ValidationError) as ve2:
-                        raise HTTPException(503, f"structured output failed validation: {ve2}")
+                        # raise HTTPException(503, f"structured output failed validation: {ve2}")
+                        raise HTTPException(503, f"structured output failed validation")
 
             tokens = (result["input_tokens"] or 0) + (result["output_tokens"] or 0)
             rtr.state[name].tokens_today += tokens
@@ -605,7 +590,8 @@ async def chat(req: ChatRequest, request: Request):
                 tag += f" → backoff {secs:.0f}s ({reason})"
             all_attempts.append({"provider": name, "reason": tag})
             if explicit_override or not getattr(e, "retryable", True):
-                raise HTTPException(502, f"{name} failed: {e}")
+                # raise HTTPException(502, f"{name} failed: {e}")
+                raise HTTPException(502, f"retry failed with {name} ")
             candidates = [c for c in candidates if c != name]
             continue
         except HTTPException:
@@ -630,11 +616,14 @@ async def chat(req: ChatRequest, request: Request):
             )
             all_attempts.append({"provider": name, "reason": f"exception: {str(e)[:120]}"})
             if explicit_override:
-                raise HTTPException(502, f"{name} failed: {e}")
+                # raise HTTPException(502, f"{name} failed: {e}")
+                raise HTTPException(502, f"{name} failed")
             candidates = [c for c in candidates if c != name]
             continue
 
-    raise HTTPException(503, f"all providers unavailable. attempts: {all_attempts}. last_error: {last_err}")
+    # raise HTTPException(503, f"all providers unavailable. attempts: {all_attempts}. last_error: {last_err}")
+    raise HTTPException(503, "all providers unavailable.try after some time")
+    
 
 
 @router.post("/v1/chat/batch")
@@ -648,7 +637,8 @@ async def chat_batch(req: BatchChatRequest, request: Request):
             except HTTPException as he:
                 return {"error": str(he.detail), "status_code": he.status_code}
             except Exception as e:
-                return {"error": str(e)[:400], "status_code": 500}
+                # return {"error": str(e)[:400], "status_code": 500}
+                return {"error": "internal error", "status_code": 500}
 
     results = await _asyncio.gather(*[_one(c) for c in req.calls])
     return {"results": results}
@@ -712,11 +702,15 @@ async def embed(req: EmbedRequest, request: Request):
         )
         if req.provider:
             if e.status == 429:
-                raise HTTPException(429, f"{req.provider} rate-limited: {e}")
+                # raise HTTPException(429, f"{req.provider} rate-limited: {e}")
+                raise HTTPException(429, f"{req.provider} rate-limited")
             if e.status == 400:
-                raise HTTPException(400, str(e))
-            raise HTTPException(502, f"{req.provider} embed failed: {e}")
-        raise HTTPException(503, str(e))
+                # raise HTTPException(400, str(e))
+                raise HTTPException(400, f"{req.provider} bad request")
+            # raise HTTPException(502, f"{req.provider} embed failed: {e}")
+            raise HTTPException(502, f"{req.provider} embed failed")
+        # raise HTTPException(503, str(e))
+        raise HTTPException(503, f"{req.provider} unavailable")
 
     db.log_call(
         provider=name,
