@@ -4,7 +4,7 @@ S11 surfaces (transcribe, speak, channels WS, control) sit alongside.
 """
 
 from __future__ import annotations
-
+import hmac
 import os
 import signal
 import time
@@ -12,8 +12,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI,Request
+from fastapi.responses import HTMLResponse, JSONResponse
 
 ROOT = Path(__file__).parent
 load_dotenv(ROOT.parent / ".env")  # repo .env, if present
@@ -34,7 +34,39 @@ from glc.routing import Router, RouterPool  # noqa: E402
 
 PORT = int(os.getenv("GLC_PORT", "8111"))
 
+DATA_PLANE_PATHS = {
+    "/v1/chat",
+    "/v1/chat/batch",
+    "/v1/vision",
+    "/v1/embed",
+    "/v1/embedders",
+    "/v1/cost-by-agent",
+    "/v1/providers",
+    "/v1/capabilities",
+    "/v1/routers",
+    "/v1/calls",
+    "/v1/status",
+    "/v1/transcribe",
+    "/v1/speak" 
+}
 
+CONTROL_PLANE_PATHS = {
+    "/v1/control/pair",
+    "/v1/control/pair/confirm",
+    "/v1/control/presence",
+    "/v1/control/kill",
+}
+
+PROTECTED_PATHS = DATA_PLANE_PATHS | CONTROL_PLANE_PATHS
+def _extract_bearer_token(request:Request) -> str :
+    """Extracts the bearer token from the Authorization header."""
+    auth_header = request.headers.get("Authorization","")
+    if auth_header.startswith("Bearer "):
+        return auth_header.removeprefix("Bearer ").strip()
+    return ""
+def _docs_enabled() -> bool:
+    """Returns True if the OpenAPI docs should be enabled."""
+    return bool(os.getenv("GLC_DOCS_ENABLED", "") .strip())
 def _install_sighup_reload() -> None:
     """Hot-reload policy.yaml on SIGHUP. Windows lacks SIGHUP so this is
     a no-op there."""
@@ -73,8 +105,37 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="GLC v1 — Gateway for LLMs and Channels", lifespan=lifespan)
+app = FastAPI(
+    title="GLC v1 — Gateway for LLMs and Channels", 
+    lifespan=lifespan,
+    docs_url="/docs" if _docs_enabled() else None,
+    redoc_url="/redoc" if _docs_enabled() else None, 
+    openapi_url="/openapi.json" if _docs_enabled() else None,       
+)           
 
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    """Middleware to enforce bearer token authentication for control-plane paths."""
+    if request.url.path in CONTROL_PLANE_PATHS:
+        expected = os.getenv("GLC_CONTROL_TOKEN","")
+    elif request.url.path in DATA_PLANE_PATHS:
+        expected = os.getenv("GLC_API_TOKEN","")
+    else:
+        return await call_next(request)
+    if not expected:
+        return JSONResponse(
+            {"detail": "gateway auth is not configured (GLC_" + ("CONTROL_TOKEN" if request.url.path in CONTROL_PLANE_PATHS else "API_TOKEN") + " unset)"},
+            status_code=503,
+        )
+    presented = _extract_bearer_token(request)
+    if not presented or not hmac.compare_digest(presented, expected):
+        return JSONResponse(
+            {"detail": "missing or invalid bearer token "},
+            status_code=401
+        )
+    
+    response = await call_next(request)
+    return response
 app.include_router(chat_route.router)
 app.include_router(transcribe_route.router)
 app.include_router(speak_route.router)
